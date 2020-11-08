@@ -6,9 +6,9 @@
 #include <sys/socket.h>
 #include <cassert>
 
-constexpr int MAX_CLIENT = 1024;
+constexpr int MAX_CLIENT = 2;
 constexpr int DEFAULT_FD = -1;
-constexpr char[] FULL_CLICENT = "too many clients\n";
+constexpr char FULL_CLIENT[] = "too many clients\n";
 constexpr int READ_BUFFER_SIZE = 1024;
 
 int main(int argc, char* argv[])
@@ -35,20 +35,24 @@ int main(int argc, char* argv[])
     listenaddr.sin_port = htons(listenport);
 
     int listenfd = socket(PF_INET, SOCK_STREAM, 0);
+    int on = 1;
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, &on, sizeof on);
+
 
     int ret = bind(listenfd, (sockaddr*)&listenaddr, sizeof listenaddr);
     assert(ret != -1);
 
-    ret = listen(ret, 5);
+    ret = listen(listenfd, 5);
+
 
     int clientfds[MAX_CLIENT];
 
-    for (int i = 0; i < MAX_CLIENT, ++i)
+    for (int i = 0; i < MAX_CLIENT; ++i)
     {
         clientfds[i] = DEFAULT_FD;
     }
 
-    struct fd_set read_sets;
+    fd_set read_sets;
     int max_fd = listenfd;
     int client_sub = -1;
     FD_ZERO(&read_sets);
@@ -67,13 +71,12 @@ int main(int argc, char* argv[])
 
             if (client_sub >= MAX_CLIENT - 1)
             {
-
                 send(connfd, FULL_CLIENT, sizeof FULL_CLIENT, 0);
                 close(connfd);
             }
             else
             {
-                int i = 0;
+                int i;
                 for (i = 0; i < MAX_CLIENT; ++i)
                 {
                     if (clientfds[i] == DEFAULT_FD)
@@ -104,10 +107,21 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            if (FD_ISET(clientfd, &read_sets))
+            if (FD_ISSET(clientfd, &read_sets))
             {
                 ssize_t read_size = 0;
-                while ((read_size = read(clientfd, buffer, READ_BUFFER_SIZE)))
+                if ((read_size = read(clientfd, buffer, READ_BUFFER_SIZE)) == 0)
+				{
+                	close(clientfd);
+                	clientfds[client_sub] = DEFAULT_FD;
+                	FD_CLR(clientfd, &read_sets);
+				}
+                write(clientfd, buffer, read_size);
+
+                if (--select_result <= 0)
+				{
+					break;
+				}
             }
         }
     }
